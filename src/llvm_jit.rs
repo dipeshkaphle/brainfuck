@@ -21,13 +21,18 @@ extern "C" fn getchar() -> u32 {
     return buf[0] as u32;
 }
 
+pub enum Action {
+    Print,
+    Execute,
+}
+
 const JIT_FUNC_NAME: &'static str = "__llvm_jit";
 const PUTCHAR: &'static str = "putchar";
 const GETCHAR: &'static str = "getchar";
 #[macro_export]
 macro_rules! load {
     ($builder: expr, $data: expr, $type: expr) => {
-        $builder.build_load($type, $data, "load")
+        $builder.build_load($type, $data, "")
     };
 }
 
@@ -230,7 +235,7 @@ impl LlvmJit {
             }
         }
     }
-    pub fn jit(&self, instructions: Vec<ByteCode>) {
+    pub fn jit(&self, instructions: Vec<ByteCode>, action: Action) {
         // - Setup context
         // - Setup module
         // - Setup builder
@@ -301,20 +306,25 @@ impl LlvmJit {
         }
         builder.build_return(None);
 
-        // println!("{}", module.to_string());
+        match action {
+            Action::Print => {
+                println!("{}", module.to_string());
+            }
+            Action::Execute => {
+                let execution_engine = module
+                    .create_jit_execution_engine(inkwell::OptimizationLevel::Aggressive)
+                    .expect("Failed to create execution engine");
 
-        let execution_engine = module
-            .create_jit_execution_engine(inkwell::OptimizationLevel::Aggressive)
-            .expect("Failed to create execution engine");
-
-        unsafe {
-            let bf_fn = execution_engine
-                .get_function::<unsafe extern "C" fn() -> ()>(JIT_FUNC_NAME)
-                .unwrap();
-            bf_fn.call();
+                unsafe {
+                    let bf_fn = execution_engine
+                        .get_function::<unsafe extern "C" fn() -> ()>(JIT_FUNC_NAME)
+                        .unwrap();
+                    bf_fn.call();
+                }
+            }
         }
     }
-    pub fn parse_and_run(src_code: String) {
+    pub fn parse_and_act(src_code: String, action: Action) {
         // Get the program parsed to bytecode
         let prog = Parser::parse_to_bytecode(src_code);
         inkwell::targets::Target::initialize_native(&InitializationConfig::default())
@@ -322,7 +332,7 @@ impl LlvmJit {
         let context = Context::create();
         let compiler = Self { context };
 
-        compiler.jit(prog.instructions);
+        compiler.jit(prog.instructions, action);
     }
 }
 
@@ -340,15 +350,18 @@ mod tests {
             context: Context::create(),
         };
 
-        compiler.jit(vec![
-            ByteCode::DataIncr(104), //'h'
-            ByteCode::Write,
-            ByteCode::DataIncr(1), // 'i'
-            ByteCode::Write,
-            ByteCode::DataPointerIncr(1),
-            ByteCode::DataIncr(10),
-            ByteCode::Write,
-        ]); // Works
+        compiler.jit(
+            vec![
+                ByteCode::DataIncr(104), //'h'
+                ByteCode::Write,
+                ByteCode::DataIncr(1), // 'i'
+                ByteCode::Write,
+                ByteCode::DataPointerIncr(1),
+                ByteCode::DataIncr(10),
+                ByteCode::Write,
+            ],
+            super::Action::Execute,
+        ); // Works
 
         // This also works fine so putchar/getchar work fine
         // compiler.jit(vec![ByteCode::Read, ByteCode::Write]); // Works
@@ -357,45 +370,45 @@ mod tests {
     #[test]
     fn hello_world() {
         let code = include_str!("../programs/hello_world.bf");
-        LlvmJit::parse_and_run(code.to_owned());
+        LlvmJit::parse_and_act(code.to_owned(), super::Action::Execute);
     }
     #[test]
     fn mandelbrot() {
         let code = include_str!("../programs/mandelbrot.bf");
-        LlvmJit::parse_and_run(code.to_owned());
+        LlvmJit::parse_and_act(code.to_owned(), super::Action::Execute);
     }
 
     #[test]
     fn nested_loop() {
         let code = include_str!("../programs/nested_loop.bf");
-        LlvmJit::parse_and_run(code.to_owned());
+        LlvmJit::parse_and_act(code.to_owned(), super::Action::Execute);
     }
 
     #[test]
     fn number_crunce() {
         let code = include_str!("../programs/number_crunch.bf");
-        LlvmJit::parse_and_run(code.to_owned());
+        LlvmJit::parse_and_act(code.to_owned(), super::Action::Execute);
     }
 
     #[test]
     fn serpinski() {
         let code = include_str!("../programs/serpinski.bf");
-        LlvmJit::parse_and_run(code.to_owned());
+        LlvmJit::parse_and_act(code.to_owned(), super::Action::Execute);
     }
 
     #[test]
     fn trivial_loop() {
         let code = include_str!("../programs/trivial_loop.bf");
-        LlvmJit::parse_and_run(code.to_owned());
+        LlvmJit::parse_and_act(code.to_owned(), super::Action::Execute);
     }
     #[test]
     fn trivial_loop2() {
         let code = include_str!("../programs/trivial_loop2.bf");
-        LlvmJit::parse_and_run(code.to_owned());
+        LlvmJit::parse_and_act(code.to_owned(), super::Action::Execute);
     }
     #[test]
     fn z() {
         let code = include_str!("../programs/z.bf");
-        LlvmJit::parse_and_run(code.to_owned());
+        LlvmJit::parse_and_act(code.to_owned(), super::Action::Execute);
     }
 }
